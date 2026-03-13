@@ -1,1 +1,28 @@
 
+{
+"name": "Pantrypal",
+"short_name": "Pantrypal",
+"description": "Myaikitchen - AI powered kitchen assistant",
+"lang": "en",
+"dir": "ltr",
+"display": "standalone",
+"orientation": "any",
+"start_url": "/",
+"scope": "/",
+"background_color": "#020617",
+"theme_color": "#10b981",
+"icons": [
+{
+"src": "https://www.google.com/search?q=https://pantry-pal-designer.vercel.app/icon-192.png",
+"sizes": "192x192",
+"type": "image/png",
+"purpose": "any"
+},
+{
+"src": "https://www.google.com/search?q=https://pantry-pal-designer.vercel.app/icon-512.png",
+"sizes": "512x512",
+"type": "image/png",
+"purpose": "any"
+}
+]
+}
