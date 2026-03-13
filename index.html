@@ -1,1 +1,130 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PantryPal: Crystal Edition</title>
+    
+    <!-- PWA REQUIREMENTS -->
+    <link rel="manifest" href="/manifest.json">
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js');
+      }
+    </script>
+
+    <!-- UI ENGINES -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;900&family=Bungee&display=swap" rel="stylesheet">
+    
+    <!-- DATABASE ENGINES -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#020617] text-slate-100 font-['Outfit']">
+    <div id="root"></div>
+
+    <script>
+        const { useState, useEffect, useRef, createElement: el } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk",
+            authDomain: "pantrypal-628fd.firebaseapp.com",
+            projectId: "pantrypal-628fd",
+            storageBucket: "pantrypal-628fd.appspot.com",
+            messagingSenderId: "236217367237",
+            appId: "1:236217367237:web:4b83b3172c722797e88220"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const appId = 'pantry-pal-final-master';
+
+        function App() {
+            const [isJoined, setIsJoined] = useState(false);
+            const [kitchenId, setKitchenId] = useState("");
+            const [items, setItems] = useState([]);
+            const [inputValue, setInputValue] = useState("");
+
+            useEffect(() => {
+                auth.onAuthStateChanged(u => { if(!u) auth.signInAnonymously(); });
+            }, []);
+
+            useEffect(() => {
+                if (!isJoined || !kitchenId) return;
+                const path = `artifacts/${appId}/public/data/${kitchenId}`;
+                return db.collection(path).orderBy('created', 'desc').onSnapshot(s => {
+                    setItems(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                });
+            }, [isJoined, kitchenId]);
+
+            const addItem = async () => {
+                if(!inputValue) return;
+                const path = `artifacts/${appId}/public/data/${kitchenId}`;
+                await db.collection(path).add({ name: inputValue, created: Date.now() });
+                setInputValue("");
+            };
+
+            if (!isJoined) {
+                return el('div', { className: "fixed inset-0 flex flex-col items-center justify-center p-10 text-center bg-[#020617]" }, [
+                    el('div', { className: "text-9xl mb-8 animate-[spin_10s_linear_infinite]" }, "🥘"),
+                    el('h1', { className: "text-6xl font-['Bungee'] crystal-text tracking-tighter mb-4 uppercase" }, "PANTRY PAL"),
+                    el('p', { className: "text-emerald-400 font-black mb-12 uppercase text-[10px] tracking-[0.8em]" }, "Professional Kitchen Guard"),
+                    el('input', { 
+                        placeholder: "KITCHEN ID", 
+                        className: "w-full max-w-xs p-6 rounded-3xl bg-slate-900 border-2 border-emerald-900/50 text-white text-center mb-4 outline-none focus:border-emerald-500",
+                        onChange: e => setKitchenId(e.target.value.toUpperCase())
+                    }),
+                    el('button', { 
+                        className: "w-full max-w-xs bg-emerald-500 text-slate-950 py-6 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all",
+                        onClick: () => kitchenId && setIsJoined(true)
+                    }, "ACTIVATE")
+                ]);
+            }
+
+            return el('div', { className: "min-h-screen" }, [
+                el('header', { className: "pt-20 pb-28 text-center bg-gradient-to-br from-[#064e3b] to-[#022c22] rounded-b-[60px] shadow-2xl relative overflow-hidden" }, [
+                    el('div', { className: "absolute -top-10 -right-10 text-9xl opacity-10 animate-[spin_30s_linear_infinite]" }, "🥘"),
+                    el('h1', { className: "text-5xl font-['Bungee'] crystal-text uppercase relative z-10" }, "PANTRY PAL"),
+                    el('p', { className: "mt-4 text-[10px] font-black tracking-[0.4em] opacity-60 relative z-10" }, `KITCHEN: ${kitchenId}`)
+                ]),
+                el('main', { className: "max-w-md mx-auto px-5 -mt-16 space-y-6 relative z-10" }, [
+                    el('div', { className: "bg-slate-900/90 p-6 rounded-[3rem] border border-white/10 flex gap-2" }, [
+                        el('input', { 
+                            placeholder: "Add item...", value: inputValue, 
+                            className: "flex-1 bg-black/40 p-5 rounded-2xl outline-none border border-white/5",
+                            onChange: e => setInputValue(e.target.value)
+                        }),
+                        el('button', { onClick: addItem, className: "bg-emerald-500 text-slate-950 w-14 h-14 rounded-2xl font-black" }, "+")
+                    ]),
+                    el('div', { className: "space-y-3" }, items.map(i => el('div', { key: i.id, className: "bg-white/5 p-6 rounded-[2rem] flex justify-between items-center border border-white/5" }, [
+                        el('span', { className: "font-black" }, i.name),
+                        el('button', { 
+                            onClick: () => db.collection(`artifacts/${appId}/public/data/${kitchenId}`).doc(i.id).delete(), 
+                            className: "text-rose-500/30 px-4 py-2 font-black" 
+                        }, "✕")
+                    ])))
+                ]),
+                el('footer', { className: "fixed bottom-0 left-0 w-full bg-[#020617]/95 backdrop-blur-3xl border-t border-emerald-500/30 p-6 flex justify-between items-center z-[1500]" }, [
+                    el('div', { className: "flex items-center gap-4" }, [
+                        el('span', { className: "text-4xl animate-[spin_10s_linear_infinite] opacity-30" }, "🍕"),
+                        el('div', { className: "font-mono text-[9px] text-emerald-400 uppercase font-black" }, "Satellite Stable")
+                    ])
+                ]),
+                el('style', null, `
+                    .crystal-text { background: linear-gradient(135deg, #fff 0%, #a7f3d0 50%, #fff 100%); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shine 4s linear infinite; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+                    @keyframes shine { to { background-position: 200% center; } }
+                `)
+            ]);
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(el(App));
+    </script>
+</body>
+</html>
+
