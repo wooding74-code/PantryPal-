@@ -43,8 +43,8 @@
 
         const { useState, useEffect, useRef, createElement: el } = React;
         
-        // --- 1. YOUR GEMINI API KEY ---
-        const apiKey = "AIzaSyCXJlSQUdETdHkn_wDqBS_aqqapHsUkWuE"; 
+        // --- 1. OPTIONAL: HARDCODED KEY (Triggers warnings if populated) ---
+        const apiKey = ""; 
 
         // --- 2. YOUR FIREBASE CONFIG ---
         let firebaseConfig = {
@@ -77,6 +77,11 @@
             const [shareLabel, setShareLabel] = useState("🔗 SHARE RECIPE");
             const [errorMsg, setErrorMsg] = useState(null);
             
+            // Security: Load key from local storage
+            const [storedApiKey, setStoredApiKey] = useState(localStorage.getItem('PANTRY_PAL_GEMINI_KEY') || "");
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [tempKeyInput, setTempKeyInput] = useState("");
+
             const progressInterval = useRef(null);
 
             const startProgress = (text) => {
@@ -90,6 +95,13 @@
             const finishProgress = () => {
                 if (progressInterval.current) clearInterval(progressInterval.current);
                 setProgress(100); setProgressText("Done!");
+            };
+
+            const saveApiKey = () => {
+                localStorage.setItem('PANTRY_PAL_GEMINI_KEY', tempKeyInput);
+                setStoredApiKey(tempKeyInput);
+                setIsSettingsOpen(false);
+                setTempKeyInput("");
             };
 
             useEffect(() => {
@@ -146,9 +158,11 @@
             const runAI = async (type) => {
                 if (!items.length) return;
                 
-                // Safety check for API key
-                if (!apiKey && !isPreview) {
-                    setRecipe("Chef needs his tools! Please add your Gemini API Key in the code.");
+                const activeKey = storedApiKey || apiKey;
+
+                if (!activeKey && !isPreview) {
+                    setIsSettingsOpen(true);
+                    setErrorMsg("Please provide an API Key in Settings to continue.");
                     return;
                 }
 
@@ -159,7 +173,6 @@
                     ? `Gordon Ramsay style analysis of: ${ingredients}. HTML bullet points only. Allergens in bold red: <strong style="color: #ef4444; font-weight: 900;">ALLERGY WARNING: [Info]</strong>. Just raw HTML.`
                     : `Gordon Ramsay style recipe for: ${ingredients}. Title and 3 steps. No markdown.`;
 
-                // Resilient model selection: Updated to use 1.5 versions and removed legacy aliases
                 const modelsToTry = isPreview 
                     ? ["gemini-2.5-flash-preview-09-2025", "gemini-1.5-flash"] 
                     : ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"];
@@ -169,7 +182,7 @@
 
                 for (const modelName of modelsToTry) {
                     try {
-                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${activeKey}`, {
                             method: 'POST', 
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -180,7 +193,7 @@
                         if (data.error) {
                             lastError = data.error.message || "Unknown API Error";
                             console.warn(`Model ${modelName} failed:`, lastError);
-                            continue; // Try next model
+                            continue;
                         }
 
                         const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -199,7 +212,7 @@
                             if (type !== 'health') confetti();
                         }, 500);
                         success = true;
-                        break; // Stop loop on success
+                        break;
                     } catch (e) { 
                         lastError = e.message;
                         console.error(`Attempt with ${modelName} failed:`, e); 
@@ -208,7 +221,7 @@
 
                 if (!success) {
                     setIsLoading(false);
-                    setRecipe(`Chef is blocked! Error: ${lastError}. Please check your API key in Google AI Studio.`);
+                    setRecipe(`Chef is blocked! Error: ${lastError}. Please check your API key settings.`);
                 }
             };
 
@@ -235,12 +248,49 @@
                 ]);
             }
 
-            return el('div', { className: "max-w-2xl mx-auto py-16 px-6" }, [
-                errorMsg && el('div', { className: "fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-rose-500 text-white px-6 py-3 rounded-full font-bold shadow-2xl animate-pulse" }, errorMsg),
-                el('header', { className: "text-center mb-12" }, [
-                    el('h1', { className: "text-5xl font-['Bungee'] sparkle-text" }, "PANTRY PAL"),
-                    el('p', { className: "text-emerald-500 font-bold tracking-widest mt-2" }, `STATION: ${kitchenId}`)
+            return el('div', { className: "max-w-2xl mx-auto py-16 px-6 relative" }, [
+                errorMsg && el('div', { className: "fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-rose-500 text-white px-6 py-3 rounded-full font-bold shadow-2xl animate-pulse flex items-center gap-3" }, [
+                    el('span', null, errorMsg),
+                    el('button', { onClick: () => setErrorMsg(null), className: "bg-black/20 rounded-full w-6 h-6 flex items-center justify-center" }, "✕")
                 ]),
+
+                // Settings Modal
+                isSettingsOpen && el('div', { className: "fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" }, [
+                    el('div', { className: "bg-slate-900 border border-white/10 p-8 rounded-[2rem] max-w-sm w-full shadow-2xl" }, [
+                        el('h2', { className: "text-2xl font-['Bungee'] mb-4 sparkle-text" }, "CHEF'S TOOLS"),
+                        el('p', { className: "text-slate-400 text-sm mb-6" }, "To keep your app secure, paste your Gemini API Key here. It stays in your browser and is never saved to the cloud."),
+                        el('input', { 
+                            type: "password",
+                            placeholder: "PASTE GEMINI API KEY",
+                            value: tempKeyInput,
+                            onChange: (e) => setTempKeyInput(e.target.value),
+                            className: "w-full bg-black p-4 rounded-xl text-white outline-none border border-white/5 focus:border-emerald-500/50 mb-4"
+                        }),
+                        el('div', { className: "flex gap-3" }, [
+                            el('button', { 
+                                onClick: saveApiKey,
+                                className: "flex-1 bg-emerald-500 text-white py-3 rounded-xl font-bold hover:bg-emerald-400"
+                            }, "SAVE KEY"),
+                            el('button', { 
+                                onClick: () => setIsSettingsOpen(false),
+                                className: "bg-slate-800 text-slate-400 px-6 py-3 rounded-xl font-bold hover:bg-slate-700"
+                            }, "CANCEL")
+                        ])
+                    ])
+                ]),
+
+                el('header', { className: "text-center mb-12 flex justify-between items-start" }, [
+                    el('div', { className: "w-10" }), // Spacer
+                    el('div', null, [
+                        el('h1', { className: "text-5xl font-['Bungee'] sparkle-text" }, "PANTRY PAL"),
+                        el('p', { className: "text-emerald-500 font-bold tracking-widest mt-2" }, `STATION: ${kitchenId}`)
+                    ]),
+                    el('button', { 
+                        onClick: () => setIsSettingsOpen(true),
+                        className: "p-3 bg-slate-900 rounded-xl border border-white/10 text-slate-400 hover:text-emerald-400 transition-colors"
+                    }, "⚙️")
+                ]),
+
                 el('div', { className: "bg-slate-900 p-8 rounded-[2rem] border border-white/10 mb-10 shadow-2xl" }, [
                     el('div', { className: "flex gap-2 mb-6" }, [
                         el('input', { 
