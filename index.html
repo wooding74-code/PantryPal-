@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PantryPal: Desktop Final</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bungee&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#020617] text-white font-['Outfit']">
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, createElement: el } = React;
+        const _k = "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk";
+        const firebaseConfig = {
+            apiKey: _k, authDomain: "pantrypal-628fd.firebaseapp.com",
+            projectId: "pantrypal-628fd", storageBucket: "pantrypal-628fd.appspot.com",
+            messagingSenderId: "236217367237", appId: "1:236217367237:web:4b83b3172c722797e88220"
+        };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        function App() {
+            const [isJoined, setIsJoined] = useState(false);
+            const [kitchenId, setKitchenId] = useState("");
+            const [items, setItems] = useState([]);
+            const [inputValue, setInputValue] = useState("");
+            const [recipe, setRecipe] = useState("");
+            const [isThinking, setIsThinking] = useState(false);
+
+            useEffect(() => {
+                if (!isJoined || !kitchenId) return;
+                return db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`)
+                    .orderBy('created', 'desc')
+                    .onSnapshot(s => setItems(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+            }, [isJoined, kitchenId]);
+
+            const handleAdd = async () => {
+                const val = inputValue.trim();
+                if(!val) return;
+                setInputValue(""); // 💎 CLEAR INPUT IMMEDIATELY
+                await db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).add({
+                    name: val, created: Date.now()
+                });
+            };
+
+            const runAI = async () => {
+                if (items.length === 0) return alert("Add items!");
+                setIsThinking(true); setRecipe("");
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${_k}`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({contents: [{parts: [{text: "Recipe for: " + items.map(i=>i.name).join(",") + ". 3 steps."}]}]})
+                    });
+                    const data = await res.json();
+                    setRecipe(data.candidates[0].content.parts[0].text);
+                    confetti();
+                } catch (e) { alert("AI Key is waking up. Try again in 3 seconds."); }
+                setIsThinking(false);
+            };
+
+            if (!isJoined) {
+                return el('div', { className: "min-h-screen flex flex-col items-center justify-center bg-[#020617] p-10" }, [
+                    el('h1', { className: "text-6xl font-['Bungee'] text-emerald-400 mb-8" }, "PANTRY PAL"),
+                    el('input', { placeholder: "KITCHEN ID", className: "p-4 rounded-xl bg-slate-900 border border-white/10 text-center mb-4", onChange: e => setKitchenId(e.target.value.toUpperCase()) }),
+                    el('button', { className: "bg-emerald-400 text-black px-12 py-4 rounded-xl font-black", onClick: () => kitchenId && setIsJoined(true) }, "ENTER")
+                ]);
+            }
+
+            return el('div', { className: "max-w-xl mx-auto py-20 px-6" }, [
+                el('h1', { className: "text-4xl font-['Bungee'] text-center mb-10 text-emerald-400" }, "KITCHEN: " + kitchenId),
+                el('div', { className: "bg-slate-900 p-8 rounded-3xl border border-white/10 mb-8" }, [
+                    el('div', { className: "flex gap-2 mb-6" }, [
+                        el('input', { value: inputValue, placeholder: "Add ingredient...", className: "flex-1 bg-black p-4 rounded-xl outline-none", onChange: e => setInputValue(e.target.value), onKeyPress: e => e.key === 'Enter' && handleAdd() }),
+                        el('button', { onClick: handleAdd, className: "bg-emerald-400 text-black px-6 rounded-xl font-bold" }, "ADD")
+                    ]),
+                    el('button', { onClick: runAI, className: "w-full py-4 bg-emerald-400 text-black rounded-xl font-black" }, "✨ GET RECIPE")
+                ]),
+                recipe && el('div', { className: "bg-white/5 p-6 rounded-2xl mb-8 border border-white/10" }, recipe),
+                items.map(i => el('div', { key: i.id, className: "bg-white/5 p-4 rounded-xl mb-2 flex justify-between" }, [
+                    el('span', null, i.name),
+                    el('button', { onClick: () => db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).doc(i.id).delete(), className: "text-red-500" }, "✕")
+                ]))
+            ]);
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(el(App));
+    </script>
+</body>
+</html>
