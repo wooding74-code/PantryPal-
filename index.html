@@ -145,8 +145,10 @@
 
             const runAI = async (type) => {
                 if (!items.length) return;
+                
+                // Safety check for API key
                 if (!apiKey && !isPreview) {
-                    setRecipe("Chef needs his tools! Paste your API Key on Line 33.");
+                    setRecipe("Chef needs his tools! Please add your Gemini API Key in the code.");
                     return;
                 }
 
@@ -157,11 +159,14 @@
                     ? `Gordon Ramsay style analysis of: ${ingredients}. HTML bullet points only. Allergens in bold red: <strong style="color: #ef4444; font-weight: 900;">ALLERGY WARNING: [Info]</strong>. Just raw HTML.`
                     : `Gordon Ramsay style recipe for: ${ingredients}. Title and 3 steps. No markdown.`;
 
+                // Resilient model selection
                 const modelsToTry = isPreview 
                     ? ["gemini-2.5-flash-preview-09-2025", "gemini-1.5-flash"] 
-                    : ["gemini-1.5-flash", "gemini-1.5-flash-latest"];
+                    : ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
 
+                let lastError = "No response from Chef.";
                 let success = false;
+
                 for (const modelName of modelsToTry) {
                     try {
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
@@ -171,10 +176,18 @@
                         });
                         
                         const data = await res.json();
-                        if (data.error) continue;
+                        
+                        if (data.error) {
+                            lastError = data.error.message || "Unknown API Error";
+                            console.warn(`Model ${modelName} failed:`, lastError);
+                            continue; // Try next model
+                        }
 
                         const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                        if (!resultText) continue;
+                        if (!resultText) {
+                            lastError = "API returned an empty response.";
+                            continue;
+                        }
 
                         let cleanText = resultText;
                         if (type === 'health') cleanText = cleanText.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
@@ -186,13 +199,16 @@
                             if (type !== 'health') confetti();
                         }, 500);
                         success = true;
-                        break;
-                    } catch (e) { console.error(e); }
+                        break; // Stop loop on success
+                    } catch (e) { 
+                        lastError = e.message;
+                        console.error(`Attempt with ${modelName} failed:`, e); 
+                    }
                 }
 
                 if (!success) {
                     setIsLoading(false);
-                    setRecipe("Chef's busy! Check your API key or internet connection.");
+                    setRecipe(`Chef is blocked! Error: ${lastError}. Please check your API key in Google AI Studio.`);
                 }
             };
 
