@@ -1,1 +1,170 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>PantryPal: Sovereign</title>
+    <link rel="manifest" href="/manifest.json">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bungee&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#020617] text-slate-100 font-['Outfit'] antialiased overflow-x-hidden">
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, useRef, createElement: el } = React;
+        const apiKey = "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk";
+        const firebaseConfig = {
+            apiKey: "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk",
+            authDomain: "pantrypal-628fd.firebaseapp.com",
+            projectId: "pantrypal-628fd",
+            storageBucket: "pantrypal-628fd.appspot.com",
+            messagingSenderId: "236217367237",
+            appId: "1:236217367237:web:4b83b3172c722797e88220"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // Audio Helper for Gemini Voice
+        function pcmToWav(pcmData, sampleRate) {
+            const buffer = new ArrayBuffer(44 + pcmData.length);
+            const view = new DataView(buffer);
+            const writeString = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+            writeString(0, 'RIFF'); view.setUint32(4, 36 + pcmData.length, true);
+            writeString(8, 'WAVE'); writeString(12, 'fmt '); view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+            writeString(36, 'data'); view.setUint32(40, pcmData.length, true);
+            for (let i = 0; i < pcmData.length; i++) view.setUint8(44 + i, pcmData[i]);
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        function App() {
+            const [isJoined, setIsJoined] = useState(false);
+            const [kitchenId, setKitchenId] = useState("");
+            const [items, setItems] = useState([]);
+            const [inputValue, setInputValue] = useState("");
+            const [recipe, setRecipe] = useState("");
+            const [isThinking, setIsThinking] = useState(false);
+            const [showCamera, setShowCamera] = useState(false);
+
+            useEffect(() => {
+                if (!isJoined || !kitchenId) return;
+                return db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).orderBy('created', 'desc').onSnapshot(s => {
+                    setItems(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                });
+            }, [isJoined, kitchenId]);
+
+            const speak = async (text) => {
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } } } )
+                    });
+                    const data = await res.json();
+                    const audio = new Audio(URL.createObjectURL(pcmToWav(Uint8Array.from(atob(data.candidates[0].content.parts[0].inlineData.data), c => c.charCodeAt(0)), 24000)));
+                    audio.play();
+                } catch (e) { console.error("Voice failed", e); }
+            };
+
+            const handleManualAdd = async () => {
+                if(!inputValue.trim()) return;
+                const newItem = inputValue;
+                setInputValue(""); 
+                await db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).add({ name: newItem, created: Date.now() });
+            };
+
+            const generateRecipe = async (mode) => {
+                if (items.length === 0) return;
+                setIsThinking(true);
+                setRecipe("");
+                const prompt = mode === 'healthy' 
+                    ? `I have: ${items.map(i => i.name).join(", ")}. Give me a HEALTHY recipe name, 3 steps, and allergy advice.`
+                    : `I have: ${items.map(i => i.name).join(", ")}. Give me a short recipe name and 3 steps.`;
+                
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await res.json();
+                    const resultText = data.candidates[0].content.parts[0].text;
+                    setRecipe(resultText);
+                    confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#ffffff'] });
+                    speak("Chef has prepared your recipe!");
+                } catch (e) { setRecipe("Chef is busy! Check your connection."); }
+                setIsThinking(false);
+            };
+
+            if (!isJoined) {
+                return el('div', { className: "fixed inset-0 flex flex-col items-center justify-center p-10 bg-[#020617]" }, [
+                    el('div', { className: "relative mb-12" }, [
+                        el('div', { className: "text-9xl animate-[spin_10s_linear_infinite]" }, "🥣"),
+                        el('div', { className: "absolute inset-0 flex items-center justify-center text-5xl" }, "🍴")
+                    ]),
+                    el('h1', { className: "text-6xl font-['Bungee'] crystal-text mb-2 text-center" }, "PANTRY PAL"),
+                    el('p', { className: "text-emerald-500/50 font-black tracking-[0.4em] text-[10px] mb-12 uppercase" }, "Vocal Sovereign"),
+                    el('input', { placeholder: "KITCHEN ID", className: "w-full max-w-xs p-6 rounded-[2rem] bg-slate-900 border-2 border-white/5 text-center mb-4", onChange: e => setKitchenId(e.target.value.toUpperCase()) }),
+                    el('button', { className: "w-full max-w-xs bg-emerald-500 text-slate-950 py-6 rounded-[2.5rem] font-black text-xl shadow-2xl", onClick: () => kitchenId && setIsJoined(true) }, "ACTIVATE")
+                ]);
+            }
+
+            return el('div', { className: "min-h-screen bg-[#020617] pb-24" }, [
+                el('header', { className: "pt-20 pb-32 text-center bg-gradient-to-br from-[#064e3b] to-[#022c22] rounded-b-[60px] shadow-2xl relative" }, [
+                    el('h1', { className: "text-4xl font-['Bungee'] crystal-text uppercase" }, "PANTRY PAL"),
+                    el('p', { className: "text-[10px] opacity-40 font-black tracking-[0.2em] mt-2 text-center" }, `KITCHEN ID: ${kitchenId}`)
+                ]),
+
+                el('main', { className: "max-w-md mx-auto px-6 -mt-16 space-y-6" }, [
+                    el('div', { className: "bg-slate-900/90 backdrop-blur-2xl p-6 rounded-[3rem] border border-white/10 shadow-2xl" }, [
+                        el('div', { className: "flex items-center bg-black/40 rounded-2xl p-2 mb-4" }, [
+                            el('input', { value: inputValue, placeholder: "Add food...", className: "flex-1 bg-transparent p-3 outline-none", onChange: e => setInputValue(e.target.value), onKeyPress: e => e.key === 'Enter' && handleManualAdd() }),
+                            el('button', { onClick: handleManualAdd, className: "bg-emerald-500 text-black w-12 h-12 rounded-xl font-black text-xl" }, "+")
+                        ]),
+                        el('div', { className: "grid grid-cols-2 gap-3 mb-4" }, [
+                            el('button', { onClick: () => generateRecipe('normal'), className: "py-4 bg-emerald-500 text-black rounded-2xl font-black text-[10px]" }, "✨ GET RECIPE"),
+                            el('button', { onClick: () => generateRecipe('healthy'), className: "py-4 bg-white/5 border border-emerald-500/30 text-emerald-400 rounded-2xl font-black text-[10px]" }, "🥗 HEALTHY / ALLERGY")
+                        ]),
+                        el('div', { className: "flex gap-2" }, [
+                            el('button', { onClick: () => setShowCamera(true), className: "flex-1 py-4 bg-white/5 rounded-2xl font-bold flex items-center justify-center gap-2 text-xs" }, "📷 SCAN"),
+                            el('button', { onClick: () => speak("I am listening. What would you like to know about your kitchen?"), className: "flex-1 py-4 bg-white/5 rounded-2xl font-bold flex items-center justify-center gap-2 text-xs" }, "🔊 TALK")
+                        ])
+                    ]),
+
+                    // Status Bar - Fixed Z-Index and Position
+                    isThinking && el('div', { className: "relative w-full h-2 bg-white/10 rounded-full overflow-hidden z-20" }, [
+                        el('div', { className: "h-full bg-emerald-400 animate-[loading_1.5s_infinite]" })
+                    ]),
+
+                    recipe && el('div', { className: "bg-emerald-500/10 p-6 rounded-[2.5rem] border border-emerald-500/20 shadow-xl" }, [
+                        el('div', { className: "flex justify-between items-center mb-2" }, [
+                            el('span', { className: "text-[10px] font-black text-emerald-400 uppercase" }, "Chef's Result"),
+                            el('button', { onClick: () => speak(recipe), className: "text-lg" }, "🔊")
+                        ]),
+                        el('div', { className: "text-sm whitespace-pre-wrap leading-relaxed opacity-90" }, recipe)
+                    ]),
+
+                    el('div', { className: "space-y-3" }, items.map(i => el('div', { key: i.id, className: "bg-white/5 p-5 rounded-[2rem] flex justify-between items-center border border-white/5 shadow-lg animate-[slideIn_0.3s_ease-out]" }, [
+                        el('div', { className: "flex items-center gap-3" }, [
+                             el('button', { onClick: () => speak(i.name), className: "opacity-30 hover:opacity-100" }, "🔊"),
+                             el('span', { className: "font-bold text-lg" }, i.name)
+                        ]),
+                        el('button', { onClick: () => db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).doc(i.id).delete(), className: "text-rose-500/40 px-4" }, "✕")
+                    ])))
+                ]),
+
+                el('style', null, `
+                    @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+                    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+                    .crystal-text { background: linear-gradient(135deg, #fff 0%, #a7f3d0 50%, #fff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4)); font-weight: 900; }
+                `)
+            ]);
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(el(App));
+    </script>
+</body>
+</html>
