@@ -1,1 +1,175 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>PantryPal: Master Edition</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#020617">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bungee&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#020617] text-slate-100 font-['Outfit'] antialiased">
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, useRef, createElement: el } = React;
+        const apiKey = "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk";
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk",
+            authDomain: "pantrypal-628fd.firebaseapp.com",
+            projectId: "pantrypal-628fd",
+            storageBucket: "pantrypal-628fd.appspot.com",
+            messagingSenderId: "236217367237",
+            appId: "1:236217367237:web:4b83b3172c722797e88220"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        function pcmToWav(pcmData, sampleRate) {
+            const buffer = new ArrayBuffer(44 + pcmData.length);
+            const view = new DataView(buffer);
+            const writeString = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+            writeString(0, 'RIFF'); view.setUint32(4, 36 + pcmData.length, true);
+            writeString(8, 'WAVE'); writeString(12, 'fmt '); view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+            writeString(36, 'data'); view.setUint32(40, pcmData.length, true);
+            for (let i = 0; i < pcmData.length; i++) view.setUint8(44 + i, pcmData[i]);
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        function App() {
+            const [isJoined, setIsJoined] = useState(false);
+            const [kitchenId, setKitchenId] = useState("");
+            const [items, setItems] = useState([]);
+            const [inputValue, setInputValue] = useState("");
+            const [recipe, setRecipe] = useState("");
+            const [isThinking, setIsThinking] = useState(false);
+            const [showCamera, setShowCamera] = useState(false);
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+
+            useEffect(() => { auth.onAuthStateChanged(u => { if(!u) auth.signInAnonymously(); }); }, []);
+
+            useEffect(() => {
+                if (!isJoined || !kitchenId) return;
+                return db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).orderBy('created', 'desc').onSnapshot(s => {
+                    setItems(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                });
+            }, [isJoined, kitchenId]);
+
+            const speak = async (text) => {
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } } } )
+                    });
+                    const data = await res.json();
+                    const audio = new Audio(URL.createObjectURL(pcmToWav(Uint8Array.from(atob(data.candidates[0].content.parts[0].inlineData.data), c => c.charCodeAt(0)), 24000)));
+                    audio.play();
+                } catch (e) { console.error(e); }
+            };
+
+            const capture = async () => {
+                setIsThinking(true);
+                const canvas = canvasRef.current;
+                const video = videoRef.current;
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                const base64 = canvas.toDataURL('image/png').split(',')[1];
+                video.srcObject.getTracks().forEach(t => t.stop());
+                setShowCamera(false);
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        body: JSON.stringify({ contents: [{ parts: [{ text: "Identify food item name only:" }, { inlineData: { mimeType: "image/png", data: base64 } }] }] })
+                    });
+                    const data = await res.json();
+                    const name = data.candidates[0].content.parts[0].text.trim();
+                    if (name) {
+                        await db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).add({ name, created: Date.now() });
+                        speak(`Added ${name}`);
+                    }
+                } catch (e) { console.error(e); }
+                setIsThinking(false);
+            };
+
+            const generateRecipe = async () => {
+                if (items.length === 0) return;
+                setIsThinking(true);
+                try {
+                    const list = items.map(i => i.name).join(", ");
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        body: JSON.stringify({ contents: [{ parts: [{ text: `I have: ${list}. Give me a short recipe name and 3 steps.` }] }] })
+                    });
+                    const data = await res.json();
+                    setRecipe(data.candidates[0].content.parts[0].text);
+                } catch (e) { setRecipe("Chef is busy!"); }
+                setIsThinking(false);
+            };
+
+            if (!isJoined) {
+                return el('div', { className: "fixed inset-0 flex flex-col items-center justify-center p-10 bg-[#020617]" }, [
+                    el('div', { className: "text-9xl mb-8 animate-bounce" }, "🥘"),
+                    el('h1', { className: "text-6xl font-['Bungee'] mb-12 text-emerald-400 text-center" }, "PANTRY PAL"),
+                    el('input', { placeholder: "ENTER KITCHEN ID", className: "w-full max-w-xs p-6 rounded-3xl bg-white/5 border border-white/10 text-center text-white mb-6 outline-none", onChange: e => setKitchenId(e.target.value.toUpperCase()) }),
+                    el('button', { className: "w-full max-w-xs bg-emerald-500 text-black py-6 rounded-3xl font-black text-xl shadow-2xl", onClick: () => kitchenId && setIsJoined(true) }, "ACTIVATE")
+                ]);
+            }
+
+            return el('div', { className: "min-h-screen p-6 max-w-md mx-auto" }, [
+                el('header', { className: "text-center mb-8" }, [
+                    el('h1', { className: "text-4xl font-['Bungee'] text-emerald-400" }, "PANTRY PAL"),
+                    el('div', { className: "text-[10px] opacity-40 font-black tracking-widest mt-2" }, `KITCHEN ID: ${kitchenId}`)
+                ]),
+
+                el('div', { className: "bg-slate-900/90 p-6 rounded-[2.5rem] border border-white/10 mb-8 space-y-4 shadow-2xl" }, [
+                    el('div', { className: "flex gap-2" }, [
+                        el('input', { value: inputValue, placeholder: "Manual add...", className: "flex-1 bg-black/40 p-5 rounded-2xl outline-none", onChange: e => setInputValue(e.target.value) }),
+                        el('button', { onClick: async () => { if(!inputValue) return; await db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).add({ name: inputValue, created: Date.now() }); setInputValue(""); }, className: "bg-emerald-500 text-black px-6 rounded-2xl font-black" }, "+")
+                    ]),
+                    el('div', { className: "flex gap-2" }, [
+                        el('button', { onClick: () => setShowCamera(true), className: "flex-1 py-5 bg-white/5 border border-white/10 rounded-2xl font-bold" }, "👁️ SCAN"),
+                        el('button', { onClick: generateRecipe, className: "flex-[2] py-5 bg-emerald-500 text-black rounded-2xl font-black shadow-lg" }, isThinking ? "CHEF THINKING..." : "✨ CREATE RECIPE")
+                    ])
+                ]),
+
+                recipe && el('div', { className: "bg-emerald-500/10 p-6 rounded-[2rem] border border-emerald-500/20 mb-8 animate-pulse" }, [
+                    el('div', { className: "flex justify-between items-center mb-4" }, [
+                        el('span', { className: "text-xs font-black text-emerald-400 uppercase tracking-widest" }, "Chef's Recommendation"),
+                        el('button', { onClick: () => setRecipe(""), className: "text-xs opacity-40" }, "Dismiss")
+                    ]),
+                    el('div', { className: "text-sm whitespace-pre-wrap leading-relaxed" }, recipe)
+                ]),
+
+                el('div', { className: "space-y-3" }, items.map(i => el('div', { key: i.id, className: "bg-white/5 p-5 rounded-3xl flex justify-between items-center border border-white/5" }, [
+                    el('div', { className: "flex items-center gap-4" }, [
+                        el('button', { onClick: () => speak(i.name), className: "opacity-40" }, "🔊"),
+                        el('span', { className: "font-bold" }, i.name)
+                    ]),
+                    el('button', { onClick: () => db.collection(`artifacts/pantry-pal-final/public/data/${kitchenId}`).doc(i.id).delete(), className: "text-rose-500/40 px-2" }, "✕")
+                ]))),
+
+                showCamera && el('div', { className: "fixed inset-0 z-50 bg-black flex flex-col items-center" }, [
+                    el('video', { ref: videoRef, autoPlay: true, playsInline: true, className: "flex-1 w-full object-cover" }),
+                    el('div', { className: "p-10 flex gap-4 w-full" }, [
+                        el('button', { onClick: () => { videoRef.current.srcObject.getTracks().forEach(t => t.stop()); setShowCamera(false); }, className: "flex-1 bg-white/10 py-5 rounded-2xl font-bold" }, "BACK"),
+                        el('button', { onClick: capture, disabled: isThinking, className: "flex-[2] bg-emerald-500 text-black py-5 rounded-2xl font-black" }, isThinking ? "ANALYSING..." : "CAPTURE FOOD")
+                    ]),
+                    el('canvas', { ref: canvasRef, className: "hidden" })
+                ])
+            ]);
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(el(App));
+    </script>
+</body>
+</html>
