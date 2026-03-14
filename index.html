@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PantryPal: Sovereign 2026</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bungee&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#020617] text-slate-100 font-['Outfit'] antialiased">
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, createElement: el } = React;
+        
+        // 🔐 SECURITY NOTE: In a real production app, move this to Vercel Environment Variables!
+        const _k = "AIzaSyDE_J0L8K_HlS-vX2nZ6Y_9pQw4E1r3M"; 
+        const firebaseConfig = {
+            apiKey: "AIzaSyBxyYEaHc0LhVqi-H5didL6Ma3aauWXDuk", 
+            authDomain: "pantrypal-628fd.firebaseapp.com",
+            projectId: "pantrypal-628fd",
+            storageBucket: "pantrypal-628fd.appspot.com",
+            messagingSenderId: "236217367237",
+            appId: "1:236217367237:web:4b83b3172c722797e88220"
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        function App() {
+            const [isJoined, setIsJoined] = useState(false);
+            const [kitchenId, setKitchenId] = useState("");
+            const [items, setItems] = useState([]);
+            const [inputValue, setInputValue] = useState("");
+            const [recipe, setRecipe] = useState("");
+            const [isLoading, setIsLoading] = useState(false);
+
+            useEffect(() => {
+                if (!isJoined || !kitchenId) return;
+                // ✅ CORRECTED FIRESTORE PATHING
+                const unsub = db.collection("kitchens").doc(kitchenId).collection("items")
+                    .orderBy('created', 'desc')
+                    .onSnapshot(s => {
+                        setItems(s.docs.map(d => ({ id: d.id, ...d.data() })));
+                    }, err => console.error("Firestore Error:", err));
+                return () => unsub();
+            }, [isJoined, kitchenId]);
+
+            const handleAdd = async () => {
+                const val = inputValue.trim();
+                if(!val) return;
+                setInputValue(""); 
+                try {
+                    await db.collection("kitchens").doc(kitchenId).collection("items").add({
+                        name: val,
+                        created: Date.now()
+                    });
+                } catch (e) { console.error("Add Error:", e); }
+            };
+
+            const runAI = async () => {
+                if (!items.length) return setRecipe("Add some items first.");
+                setIsLoading(true);
+                setRecipe("");
+                
+                try {
+                    // 🚀 2026 MODEL UPDATE: Gemini 2.5 Flash
+                    const res = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-latest:generateContent?key=${_k}`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: `You are a world-class chef. Use these ingredients: ${items.map(i => i.name).join(", ")}. Give me a catchy recipe name and 3 bulleted steps.` }] }]
+                            })
+                        }
+                    );
+
+                    if (!res.ok) throw new Error(`Status: ${res.status}`);
+                    
+                    const data = await res.json();
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    
+                    if (text) {
+                        setRecipe(text);
+                        confetti({ particleCount: 150, spread: 70, origin: { y: 0.8 } });
+                    } else {
+                        setRecipe("AI generated an empty response. Try adding more variety.");
+                    }
+                } catch (err) {
+                    setRecipe(`Connection Error: ${err.message}. Ensure your API key is active.`);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            if (!isJoined) {
+                return el('div', { className: "min-h-screen flex flex-col items-center justify-center p-10 bg-[#020617]" }, [
+                    el('h1', { className: "text-7xl font-['Bungee'] diamond-text mb-8" }, "PANTRY PAL"),
+                    el('div', { className: "bg-slate-900/50 p-8 rounded-[2rem] border border-white/5 shadow-2xl" }, [
+                        el('input', { 
+                            placeholder: "ENTER KITCHEN ID", 
+                            className: "w-80 p-5 rounded-2xl bg-black border border-white/10 text-center text-white mb-6 uppercase", 
+                            onChange: e => setKitchenId(e.target.value.toUpperCase()) 
+                        }),
+                        el('button', { 
+                            className: "w-80 bg-emerald-500 text-black py-5 rounded-2xl font-black text-xl hover:bg-emerald-400 active:scale-95 transition-all", 
+                            onClick: () => kitchenId && setIsJoined(true) 
+                        }, "ACTIVATE STATION")
+                    ])
+                ]);
+            }
+
+            return el('div', { className: "max-w-2xl mx-auto py-16 px-6" }, [
+                el('header', { className: "text-center mb-12" }, [
+                    el('h1', { className: "text-5xl font-['Bungee'] diamond-text" }, "PANTRY PAL"),
+                    el('div', { className: "mt-2 text-emerald-400/60 font-black tracking-widest" }, `STATION: ${kitchenId}`)
+                ]),
+                el('div', { className: "bg-slate-900/80 p-8 rounded-[2.5rem] border border-white/10 shadow-2xl relative mb-10" }, [
+                    isLoading && el('div', { className: "absolute top-0 left-0 w-full h-1 bg-emerald-500 animate-pulse" }),
+                    el('div', { className: "flex gap-3 mb-6" }, [
+                        el('input', { 
+                            value: inputValue, 
+                            placeholder: "What's in the pantry?", 
+                            className: "flex-1 bg-black/40 p-4 rounded-xl text-white outline-none border border-white/5 focus:border-emerald-500/50", 
+                            onChange: e => setInputValue(e.target.value), 
+                            onKeyPress: e => e.key === 'Enter' && handleAdd() 
+                        }),
+                        el('button', { onClick: handleAdd, className: "bg-emerald-500 text-black px-8 rounded-xl font-bold hover:bg-emerald-400 transition-colors" }, "ADD")
+                    ]),
+                    el('button', { 
+                        onClick: runAI, 
+                        disabled: isLoading,
+                        className: `w-full py-5 rounded-xl font-black text-sm uppercase shadow-lg transition-all ${isLoading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-500 text-black hover:brightness-110 active:scale-95'}`
+                    }, isLoading ? "👨‍🍳 CHEF IS COOKING..." : "✨ GENERATE RECIPE")
+                ]),
+                recipe && el('div', { className: "bg-emerald-500/5 p-8 rounded-3xl border border-emerald-500/10 mb-10 text-sm whitespace-pre-wrap leading-relaxed animate-in fade-in" }, recipe),
+                el('div', { className: "space-y-4" }, items.map(i => el('div', { key: i.id, className: "bg-white/5 p-5 rounded-2xl flex justify-between items-center border border-white/5 hover:bg-white/[0.08] transition-colors" }, [
+                    el('span', { className: "text-xl font-bold" }, i.name),
+                    el('button', { onClick: () => db.collection("kitchens").doc(kitchenId).collection("items").doc(i.id).delete(), className: "text-rose-500 px-2" }, "✕")
+                ])))
+            ]);
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(el(App));
+    </script>
+    <style>
+        .diamond-text { background: linear-gradient(90deg, #fff, #a7f3d0, #fff); background-size: 200%; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shim 4s linear infinite; }
+        @keyframes shim { to { background-position: 200% center; } }
+    </style>
+</body>
+</html>
