@@ -11,10 +11,16 @@
 "lang": "en-US",
 "icons": [
 {
-"src": "https://www.google.com/search?q=https://cdn-icons-png.flaticon.com/512/3565/3565418.png",
+"src": "https://www.google.com/url?sa=E&source=gmail&q=https://cdn-icons-png.flaticon.com/512/3565/3565418.png",
 "sizes": "512x512",
 "type": "image/png",
-"purpose": "any maskable"
+"purpose": "any"
+},
+{
+"src": "https://www.google.com/url?sa=E&source=gmail&q=https://cdn-icons-png.flaticon.com/512/3565/3565418.png",
+"sizes": "512x512",
+"type": "image/png",
+"purpose": "maskable"
 }
 ]
 }
