@@ -159,10 +159,10 @@
                     ? `Gordon Ramsay style analysis of: ${ingredients}. HTML bullet points only. Allergens in bold red: <strong style="color: #ef4444; font-weight: 900;">ALLERGY WARNING: [Info]</strong>. Just raw HTML.`
                     : `Gordon Ramsay style recipe for: ${ingredients}. Title and 3 steps. No markdown.`;
 
-                // Resilient model selection
+                // Resilient model selection: Updated to use 1.5 versions and removed legacy aliases
                 const modelsToTry = isPreview 
                     ? ["gemini-2.5-flash-preview-09-2025", "gemini-1.5-flash"] 
-                    : ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+                    : ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"];
 
                 let lastError = "No response from Chef.";
                 let success = false;
